@@ -28,7 +28,7 @@ df = load_data()
 # ==========================================
 # 첫 번째 그래프: 장르별 영화 편수 (도넛 그래프)
 # ==========================================
-st.subheader("1. 장르별 영화 편수")
+st.subheader("1. 장르별 영화 편수 (도넛 그래프)")
 
 # 장르별 편수 집계
 genre_counts = df["genre"].value_counts().reset_index()
@@ -57,7 +57,9 @@ total_count = genre_counts["편수"].sum()
 top_ratio = (top_count / total_count) * 100
 
 st.info(
-    f"**이 그래프로 알 수 있는 것:** 개봉한 영화 중 **{top_genre}** 장르가 총 {top_count}편({top_ratio:.1f}%)으로 가장 높은 비중을 차지하고 있습니다."
+    f"**이 그래프로 알 수 있는 것:**\n\n"
+    f"- **그래프 특성:** 도넛 그래프는 전체에서 각 범주(장르)가 차지하는 비중과 비율을 한눈에 파악하고 비교하기에 적합합니다.\n"
+    f"- **데이터 분석:** 개봉한 영화 중 **{top_genre}** 장르가 총 {top_count}편({top_ratio:.1f}%)으로 가장 높은 비중을 차지하고 있습니다."
 )
 
 st.divider()
@@ -65,7 +67,7 @@ st.divider()
 # ==========================================
 # 두 번째 그래프: 장르 및 영화별 총 관객 수 (트리맵)
 # ==========================================
-st.subheader("2. 장르 및 영화별 총 관객 수")
+st.subheader("2. 장르 및 영화별 총 관객 수 (트리맵)")
 
 # 트리맵용 데이터 전처리 (결측치 제거, 숫자 변환, 0 초과 값만 선택)
 df_tree = df.dropna(subset=["genre", "movieNm", "total_audi"]).copy()
@@ -74,8 +76,7 @@ df_tree = df_tree[df_tree["total_audi"] > 0]
 
 # 동일 장르/영화명 중복 항목 합산 처리
 df_tree = (
-    df_tree.groupby(["genre", "movieNm"], as_index=False)["total_audi"]
-    .sum()
+    df_tree.groupby(["genre", "movieNm"], as_index=False)["total_audi"].sum()
 )
 
 # 트리맵 그래프 생성
@@ -98,7 +99,63 @@ top_movie_name = top_movie_row["movieNm"]
 top_movie_audi = top_movie_row["total_audi"] / 10000
 
 st.info(
-    f"**이 그래프로 알 수 있는 것:** 총 관객 동원력이 가장 높은 장르는 **{top_audi_genre}**이며, 단일 영화 기준으로는 **{top_movie_name}**(약 {top_movie_audi:,.0f}만 명)이 가장 큰 비중을 차지하고 있습니다."
+    f"**이 그래프로 알 수 있는 것:**\n\n"
+    f"- **그래프 특성:** 트리맵 그래프는 상위 계층(장르)과 하위 계층(영화) 구조를 직관적으로 표현하며, 각 항목의 관객 수 규모를 사각형 면적으로 비교하는 데 유용합니다.\n"
+    f"- **데이터 분석:** 총 관객 동원력이 가장 높은 장르는 **{top_audi_genre}**이며, 단일 영화 기준으로는 **{top_movie_name}**(약 {top_movie_audi:,.0f}만 명)이 가장 큰 비중을 차지하고 있습니다."
+)
+
+st.divider()
+
+# ==========================================
+# 세 번째 그래프: 총 관객 수 분포 (히스토그램)
+# ==========================================
+st.subheader("3. 총 관객 수 분포 (히스토그램)")
+
+# 히스토그램용 데이터 전처리
+df_hist = df.dropna(subset=["total_audi"]).copy()
+df_hist["total_audi"] = pd.to_numeric(df_hist["total_audi"], errors="coerce")
+df_hist = df_hist[df_hist["total_audi"] > 0]
+
+# 히스토그램 그래프 생성
+fig3 = px.histogram(
+    df_hist,
+    x="total_audi",
+    nbins=20,
+    labels={"total_audi": "총 관객 수", "count": "영화 편수"},
+)
+
+fig3.update_traces(
+    hovertemplate="<b>총 관객 수 구간</b>: %{x}명<br><b>영화 편수</b>: %{y}편<extra></extra>"
+)
+
+fig3.update_layout(
+    xaxis_title="총 관객 수 (명)", yaxis_title="영화 편수 (개)", bargap=0.1
+)
+
+st.plotly_chart(fig3, use_container_width=True)
+
+# 인사이트 자동 계산
+# 100만 명 단위 구간 생성 후 최다 영화 집중 구간 산출
+max_audi = int(df_hist["total_audi"].max())
+bin_size = 1000000  # 100만 명
+bins = list(range(0, max_audi + bin_size, bin_size))
+labels = [f"{i//10000}~{(i+bin_size)//10000}만 명" for i in bins[:-1]]
+
+df_hist["audi_range"] = pd.cut(
+    df_hist["total_audi"], bins=bins, labels=labels, include_lowest=True
+)
+most_frequent_range = df_hist["audi_range"].mode()[0]
+most_frequent_count = df_hist["audi_range"].value_counts().max()
+
+# 최다 관객 수 영화 산출
+top_movie_hist = df_hist.loc[df_hist["total_audi"].idxmax()]
+top_movie_hist_name = top_movie_hist["movieNm"]
+top_movie_hist_audi = top_movie_hist["total_audi"] / 10000
+
+st.info(
+    f"**이 그래프로 알 수 있는 것:**\n\n"
+    f"- **그래프 특성:** 히스토그램은 수치형 연속 데이터의 전체적인 분포 형태, 쏠림 정도, 특정 구간으로의 밀집 상태를 확인하기에 적합합니다.\n"
+    f"- **데이터 분석:** 대부분의 영화({most_frequent_count}편)가 **{most_frequent_range}** 구간에 몰려 있으며, 가장 많은 관객을 동원한 영화는 **{top_movie_hist_name}**(약 {top_movie_hist_audi:,.0f}만 명)입니다."
 )
 
 st.divider()
