@@ -34,7 +34,7 @@ st.subheader("1. 장르별 영화 편수")
 genre_counts = df["genre"].value_counts().reset_index()
 genre_counts.columns = ["장르", "편수"]
 
-# 플롯리 도넛 그래프 생성 (hole 파라미터로 도넛 형태 구현)
+# 플롯리 도넛 그래프 생성
 fig1 = px.pie(
     genre_counts,
     values="편수",
@@ -42,14 +42,12 @@ fig1 = px.pie(
     hole=0.4,
 )
 
-# 마우스를 올렸을 때(Hover) 편수와 비율이 보이도록 툴팁 템플릿 설정
 fig1.update_traces(
     textposition="inside",
     textinfo="label+percent",
     hovertemplate="<b>%{label}</b><br>편수: %{value}편<br>비율: %{percent}<extra></extra>",
 )
 
-# 그래프 출력
 st.plotly_chart(fig1, use_container_width=True)
 
 # 인사이트 자동 계산 및 출력
@@ -62,7 +60,6 @@ st.info(
     f"**이 그래프로 알 수 있는 것:** 개봉한 영화 중 **{top_genre}** 장르가 총 {top_count}편({top_ratio:.1f}%)으로 가장 높은 비중을 차지하고 있습니다."
 )
 
-# 구역 나누기
 st.divider()
 
 # ==========================================
@@ -70,30 +67,38 @@ st.divider()
 # ==========================================
 st.subheader("2. 장르 및 영화별 총 관객 수")
 
-# 트리맵 그래프 생성 (장르 -> 영화명 계층 구조, 타일 크기는 total_audi)
+# 트리맵용 데이터 전처리 (결측치 제거, 숫자 변환, 0 초과 값만 선택)
+df_tree = df.dropna(subset=["genre", "movieNm", "total_audi"]).copy()
+df_tree["total_audi"] = pd.to_numeric(df_tree["total_audi"], errors="coerce")
+df_tree = df_tree[df_tree["total_audi"] > 0]
+
+# 동일 장르/영화명 중복 항목 합산 처리
+df_tree = (
+    df_tree.groupby(["genre", "movieNm"], as_index=False)["total_audi"]
+    .sum()
+)
+
+# 트리맵 그래프 생성
 fig2 = px.treemap(
-    df,
+    df_tree,
     path=["genre", "movieNm"],
     values="total_audi",
 )
 
-# 마우스를 올렸을 때(Hover) 영화명(또는 장르명)과 총 관객 수가 보이도록 설정
 fig2.update_traces(
     hovertemplate="<b>%{label}</b><br>총 관객 수: %{value:,}명<extra></extra>"
 )
 
-# 그래프 출력
 st.plotly_chart(fig2, use_container_width=True)
 
 # 인사이트 자동 계산 및 출력
-top_audi_genre = df.groupby("genre")["total_audi"].sum().idxmax()
-top_movie_row = df.loc[df["total_audi"].idxmax()]
+top_audi_genre = df_tree.groupby("genre")["total_audi"].sum().idxmax()
+top_movie_row = df_tree.loc[df_tree["total_audi"].idxmax()]
 top_movie_name = top_movie_row["movieNm"]
-top_movie_audi = top_movie_row["total_audi"] / 10000  # 만 명 단위 변환
+top_movie_audi = top_movie_row["total_audi"] / 10000
 
 st.info(
     f"**이 그래프로 알 수 있는 것:** 총 관객 동원력이 가장 높은 장르는 **{top_audi_genre}**이며, 단일 영화 기준으로는 **{top_movie_name}**(약 {top_movie_audi:,.0f}만 명)이 가장 큰 비중을 차지하고 있습니다."
 )
 
-# 구역 나누기
 st.divider()
