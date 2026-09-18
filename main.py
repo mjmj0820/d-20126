@@ -59,3 +59,31 @@ st.info(
 
 # 구역 나누기
 st.divider()
+
+# ==========================================
+# 두 번째 그래프: 장르 및 영화별 총 관객 수 (트리맵)
+# ==========================================
+st.subheader("2. 장르 및 영화별 총 관객 수")
+
+# 트리맵 그래프 생성 (장르 -> 영화명 계층 구조, 타일 크기는 total_audi)
+fig2 = px.treemap(
+    df,
+    path=["genre", "movieNm"],
+    values="total_audi",
+)
+
+# 마우스를 올렸을 때(Hover) 영화명(또는 장르명)과 총 관객 수가 보이도록 설정
+fig2.update_traces(
+    hovertemplate="<b>%{label}</b><br>총 관객 수: %{value:,}명<extra></extra>"
+)
+
+# 그래프 출력
+st.plotly_chart(fig2, use_container_width=True)
+
+# 인사이트 작성란
+st.info(
+    "**이 그래프로 알 수 있는 것:** (이곳에 그래프에서 얻을 수 있는 핵심 인사이트 한 문장을 적어주세요.)"
+)
+
+# 구역 나누기
+st.divider()
