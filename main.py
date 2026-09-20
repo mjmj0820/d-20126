@@ -233,7 +233,7 @@ df_box = df[df["genre"].isin(valid_genres)].copy()
 df_box["total_audi"] = pd.to_numeric(df_box["total_audi"], errors="coerce")
 df_box = df_box.dropna(subset=["genre", "total_audi", "movieNm"])
 
-# 상자 그림 생성 (hover_name에 영화명 지정하여 이상치 점에 마우스 올릴 때 표출)
+# 상자 그림 생성
 fig5 = px.box(
     df_box,
     x="genre",
@@ -273,6 +273,72 @@ st.info(
     f"**이 그래프로 알 수 있는 것:**\n\n"
     f"- **그래프 특성:** 상자 그림(Box Plot)은 범주별 데이터의 중앙값, 사분위수(분포 범위), 그리고 평균적인 범위를 크게 벗어난 이상치(Outlier)를 비교하기에 적합합니다.\n"
     f"- **데이터 분석:** 10편 이상 개봉한 장르 중 중앙값 기준 관객 동원력이 가장 높은 장르는 **{top_median_genre}**(중앙값 약 {top_median_val:,.0f}만 명)이며, **{top_outlier_genre}** 장르의 **{top_outlier_movie}**(약 {top_outlier_audi:,.0f}만 명)가 가장 두드러진 아웃라이어로 나타납니다."
+)
+
+st.divider()
+
+# ==========================================
+# 여섯 번째 그래프: 스크린 수 vs 총 관객 수 vs 첫 주 관객 수 (버블 차트)
+# ==========================================
+st.subheader("6. 개봉일 스크린 수 vs 총 관객 수 vs 첫 주 관객 수 (버블 차트)")
+
+# 버블 차트용 데이터 전처리
+df_bubble = df.dropna(
+    subset=["first_scrn", "total_audi", "first_week_audi", "genre", "movieNm"]
+).copy()
+df_bubble["first_scrn"] = pd.to_numeric(
+    df_bubble["first_scrn"], errors="coerce"
+)
+df_bubble["total_audi"] = pd.to_numeric(
+    df_bubble["total_audi"], errors="coerce"
+)
+df_bubble["first_week_audi"] = pd.to_numeric(
+    df_bubble["first_week_audi"], errors="coerce"
+)
+df_bubble = df_bubble[
+    (df_bubble["first_scrn"] > 0)
+    & (df_bubble["total_audi"] > 0)
+    & (df_bubble["first_week_audi"] > 0)
+]
+
+# 버블 차트 생성 (size=first_week_audi)
+fig6 = px.scatter(
+    df_bubble,
+    x="first_scrn",
+    y="total_audi",
+    size="first_week_audi",
+    color="genre",
+    hover_name="movieNm",
+    size_max=40,
+    labels={
+        "first_scrn": "개봉일 스크린 수",
+        "total_audi": "총 관객 수",
+        "first_week_audi": "첫 주 관객 수",
+        "genre": "장르",
+    },
+)
+
+fig6.update_traces(
+    hovertemplate="<b>%{hovertext}</b><br>개봉일 스크린 수: %{x:,}개<br>총 관객 수: %{y:,}명<br>첫 주 관객 수: %{marker.size:,}명<extra></extra>"
+)
+
+fig6.update_layout(
+    xaxis_title="개봉일 스크린 수 (개)",
+    yaxis_title="총 관객 수 (명)",
+)
+
+st.plotly_chart(fig6, use_container_width=True)
+
+# 인사이트 자동 계산
+corr_first_week = df_bubble["first_week_audi"].corr(df_bubble["total_audi"])
+top_first_week_row = df_bubble.loc[df_bubble["first_week_audi"].idxmax()]
+top_first_week_movie = top_first_week_row["movieNm"]
+top_first_week_audi = top_first_week_row["first_week_audi"] / 10000
+
+st.info(
+    f"**이 그래프로 알 수 있는 것:**\n\n"
+    f"- **그래프 특성:** 버블 차트(Bubble Chart)는 산점도에 원의 크기(3번째 변수)를 추가하여 세 가지 수치형 변수 간의 다차원적 상관관계와 규모를 동시에 비교하기에 적합합니다.\n"
+    f"- **데이터 분석:** 개봉일 스크린 수와 총 관객 수가 높은 영화일수록 **첫 주 관객 수(원의 크기)** 또한 대체로 크며(상관계수 r ≈ {corr_first_week:.2f}), 첫 주 흥행 실적이 최종 성공에 강력한 영향을 미침을 보여줍니다. (첫 주 관객 최다 영화: **{top_first_week_movie}**, 약 {top_first_week_audi:,.0f}만 명)"
 )
 
 st.divider()
