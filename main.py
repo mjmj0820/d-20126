@@ -177,7 +177,7 @@ df_scatter = df_scatter[
     (df_scatter["first_scrn"] > 0) & (df_scatter["total_audi"] > 0)
 ]
 
-# 산점도 그래프 생성 (점 색상은 장르별, 마우스 호버 시 영화명 표출)
+# 산점도 그래프 생성
 fig4 = px.scatter(
     df_scatter,
     x="first_scrn",
@@ -202,7 +202,7 @@ fig4.update_layout(
 
 st.plotly_chart(fig4, use_container_width=True)
 
-# 인사이트 자동 계산 (상관계수 계산)
+# 인사이트 자동 계산
 corr = df_scatter["first_scrn"].corr(df_scatter["total_audi"])
 corr_text = (
     "강한 양의 상관관계"
@@ -216,6 +216,63 @@ st.info(
     f"**이 그래프로 알 수 있는 것:**\n\n"
     f"- **그래프 특성:** 산점도(Scatter Plot)는 두 연속형 변수 간의 관계(상관관계, 경향성, 아웃라이어)를 시각화하고 그룹별(장르별) 분포 차이를 파악하는 데 적합합니다.\n"
     f"- **데이터 분석:** 개봉일 스크린 수와 총 관객 수 간에는 **{corr_text}(상관계수 r ≈ {corr:.2f})**가 관찰되며, 초기 스크린 수를 많이 확보할수록 최종 관객 수가 증가하는 경향이 있음을 보여줍니다."
+)
+
+st.divider()
+
+# ==========================================
+# 다섯 번째 그래프: 주요 장르별 총 관객 수 분포 (상자 그림)
+# ==========================================
+st.subheader("5. 주요 장르별 총 관객 수 분포 (상자 그림)")
+
+# 영화가 10편 이상인 장르만 필터링
+genre_counts_all = df["genre"].value_counts()
+valid_genres = genre_counts_all[genre_counts_all >= 10].index
+
+df_box = df[df["genre"].isin(valid_genres)].copy()
+df_box["total_audi"] = pd.to_numeric(df_box["total_audi"], errors="coerce")
+df_box = df_box.dropna(subset=["genre", "total_audi", "movieNm"])
+
+# 상자 그림 생성 (hover_name에 영화명 지정하여 이상치 점에 마우스 올릴 때 표출)
+fig5 = px.box(
+    df_box,
+    x="genre",
+    y="total_audi",
+    hover_name="movieNm",
+    points="outliers",
+    labels={
+        "genre": "장르",
+        "total_audi": "총 관객 수",
+    },
+)
+
+fig5.update_traces(
+    hovertemplate="<b>%{hovertext}</b><br>총 관객 수: %{y:,}명<extra></extra>"
+)
+
+fig5.update_layout(
+    xaxis_title="장르 (10편 이상 개봉)",
+    yaxis_title="총 관객 수 (명)",
+)
+
+st.plotly_chart(fig5, use_container_width=True)
+
+# 인사이트 자동 계산
+median_by_genre = (
+    df_box.groupby("genre")["total_audi"].median().sort_values(ascending=False)
+)
+top_median_genre = median_by_genre.index[0]
+top_median_val = median_by_genre.iloc[0] / 10000
+
+top_outlier_row = df_box.loc[df_box["total_audi"].idxmax()]
+top_outlier_movie = top_outlier_row["movieNm"]
+top_outlier_genre = top_outlier_row["genre"]
+top_outlier_audi = top_outlier_row["total_audi"] / 10000
+
+st.info(
+    f"**이 그래프로 알 수 있는 것:**\n\n"
+    f"- **그래프 특성:** 상자 그림(Box Plot)은 범주별 데이터의 중앙값, 사분위수(분포 범위), 그리고 평균적인 범위를 크게 벗어난 이상치(Outlier)를 비교하기에 적합합니다.\n"
+    f"- **데이터 분석:** 10편 이상 개봉한 장르 중 중앙값 기준 관객 동원력이 가장 높은 장르는 **{top_median_genre}**(중앙값 약 {top_median_val:,.0f}만 명)이며, **{top_outlier_genre}** 장르의 **{top_outlier_movie}**(약 {top_outlier_audi:,.0f}만 명)가 가장 두드러진 아웃라이어로 나타납니다."
 )
 
 st.divider()
