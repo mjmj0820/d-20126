@@ -69,7 +69,7 @@ st.divider()
 # ==========================================
 st.subheader("2. 장르 및 영화별 총 관객 수 (트리맵)")
 
-# 트리맵용 데이터 전처리 (결측치 제거, 숫자 변환, 0 초과 값만 선택)
+# 트리맵용 데이터 전처리
 df_tree = df.dropna(subset=["genre", "movieNm", "total_audi"]).copy()
 df_tree["total_audi"] = pd.to_numeric(df_tree["total_audi"], errors="coerce")
 df_tree = df_tree[df_tree["total_audi"] > 0]
@@ -135,7 +135,6 @@ fig3.update_layout(
 st.plotly_chart(fig3, use_container_width=True)
 
 # 인사이트 자동 계산
-# 100만 명 단위 구간 생성 후 최다 영화 집중 구간 산출
 max_audi = int(df_hist["total_audi"].max())
 bin_size = 1000000  # 100만 명
 bins = list(range(0, max_audi + bin_size, bin_size))
@@ -147,7 +146,6 @@ df_hist["audi_range"] = pd.cut(
 most_frequent_range = df_hist["audi_range"].mode()[0]
 most_frequent_count = df_hist["audi_range"].value_counts().max()
 
-# 최다 관객 수 영화 산출
 top_movie_hist = df_hist.loc[df_hist["total_audi"].idxmax()]
 top_movie_hist_name = top_movie_hist["movieNm"]
 top_movie_hist_audi = top_movie_hist["total_audi"] / 10000
@@ -156,6 +154,68 @@ st.info(
     f"**이 그래프로 알 수 있는 것:**\n\n"
     f"- **그래프 특성:** 히스토그램은 수치형 연속 데이터의 전체적인 분포 형태, 쏠림 정도, 특정 구간으로의 밀집 상태를 확인하기에 적합합니다.\n"
     f"- **데이터 분석:** 대부분의 영화({most_frequent_count}편)가 **{most_frequent_range}** 구간에 몰려 있으며, 가장 많은 관객을 동원한 영화는 **{top_movie_hist_name}**(약 {top_movie_hist_audi:,.0f}만 명)입니다."
+)
+
+st.divider()
+
+# ==========================================
+# 네 번째 그래프: 개봉일 스크린 수 vs 총 관객 수 (산점도)
+# ==========================================
+st.subheader("4. 개봉일 스크린 수 vs 총 관객 수 (산점도)")
+
+# 산점도용 데이터 전처리
+df_scatter = df.dropna(
+    subset=["first_scrn", "total_audi", "genre", "movieNm"]
+).copy()
+df_scatter["first_scrn"] = pd.to_numeric(
+    df_scatter["first_scrn"], errors="coerce"
+)
+df_scatter["total_audi"] = pd.to_numeric(
+    df_scatter["total_audi"], errors="coerce"
+)
+df_scatter = df_scatter[
+    (df_scatter["first_scrn"] > 0) & (df_scatter["total_audi"] > 0)
+]
+
+# 산점도 그래프 생성 (점 색상은 장르별, 마우스 호버 시 영화명 표출)
+fig4 = px.scatter(
+    df_scatter,
+    x="first_scrn",
+    y="total_audi",
+    color="genre",
+    hover_name="movieNm",
+    labels={
+        "first_scrn": "개봉일 스크린 수",
+        "total_audi": "총 관객 수",
+        "genre": "장르",
+    },
+)
+
+fig4.update_traces(
+    hovertemplate="<b>%{hovertext}</b><br>개봉일 스크린 수: %{x:,}개<br>총 관객 수: %{y:,}명<extra></extra>"
+)
+
+fig4.update_layout(
+    xaxis_title="개봉일 스크린 수 (개)",
+    yaxis_title="총 관객 수 (명)",
+)
+
+st.plotly_chart(fig4, use_container_width=True)
+
+# 인사이트 자동 계산 (상관계수 계산)
+corr = df_scatter["first_scrn"].corr(df_scatter["total_audi"])
+corr_text = (
+    "강한 양의 상관관계"
+    if corr > 0.7
+    else "뚜렷한 양의 상관관계"
+    if corr > 0.4
+    else "약한 상관관계"
+)
+
+st.info(
+    f"**이 그래프로 알 수 있는 것:**\n\n"
+    f"- **그래프 특성:** 산점도(Scatter Plot)는 두 연속형 변수 간의 관계(상관관계, 경향성, 아웃라이어)를 시각화하고 그룹별(장르별) 분포 차이를 파악하는 데 적합합니다.\n"
+    f"- **데이터 분석:** 개봉일 스크린 수와 총 관객 수 간에는 **{corr_text}(상관계수 r ≈ {corr:.2f})**가 관찰되며, 초기 스크린 수를 많이 확보할수록 최종 관객 수가 증가하는 경향이 있음을 보여줍니다."
 )
 
 st.divider()
