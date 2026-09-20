@@ -301,7 +301,7 @@ df_bubble = df_bubble[
     & (df_bubble["first_week_audi"] > 0)
 ]
 
-# 버블 차트 생성 (size=first_week_audi)
+# 버블 차트 생성
 fig6 = px.scatter(
     df_bubble,
     x="first_scrn",
@@ -339,6 +339,50 @@ st.info(
     f"**이 그래프로 알 수 있는 것:**\n\n"
     f"- **그래프 특성:** 버블 차트(Bubble Chart)는 산점도에 원의 크기(3번째 변수)를 추가하여 세 가지 수치형 변수 간의 다차원적 상관관계와 규모를 동시에 비교하기에 적합합니다.\n"
     f"- **데이터 분석:** 개봉일 스크린 수와 총 관객 수가 높은 영화일수록 **첫 주 관객 수(원의 크기)** 또한 대체로 크며(상관계수 r ≈ {corr_first_week:.2f}), 첫 주 흥행 실적이 최종 성공에 강력한 영향을 미침을 보여줍니다. (첫 주 관객 최다 영화: **{top_first_week_movie}**, 약 {top_first_week_audi:,.0f}만 명)"
+)
+
+st.divider()
+
+# ==========================================
+# 일곱 번째 그래프: 제작 국가 및 장르별 영화 편수 (선버스트)
+# ==========================================
+st.subheader("7. 제작 국가 및 장르별 영화 편수 (선버스트)")
+
+# 선버스트용 데이터 전처리 (국가 및 장르별 영화 편수 집계)
+df_sun = df.dropna(subset=["nation", "genre"]).copy()
+df_sun = (
+    df_sun.groupby(["nation", "genre"]).size().reset_index(name="movie_count")
+)
+
+# 선버스트 그래프 생성
+fig7 = px.sunburst(
+    df_sun,
+    path=["nation", "genre"],
+    values="movie_count",
+)
+
+fig7.update_traces(
+    hovertemplate="<b>%{label}</b><br>영화 편수: %{value}편<extra></extra>"
+)
+
+st.plotly_chart(fig7, use_container_width=True)
+
+# 인사이트 자동 계산
+top_nation = df_sun.groupby("nation")["movie_count"].sum().idxmax()
+top_nation_count = df_sun.groupby("nation")["movie_count"].sum().max()
+
+top_genre_in_nation_row = (
+    df_sun[df_sun["nation"] == top_nation]
+    .sort_values(by="movie_count", ascending=False)
+    .iloc[0]
+)
+top_genre_name = top_genre_in_nation_row["genre"]
+top_genre_count = top_genre_in_nation_row["movie_count"]
+
+st.info(
+    f"**이 그래프로 알 수 있는 것:**\n\n"
+    f"- **그래프 특성:** 선버스트 차트(Sunburst Chart)는 계층적 데이터 구조(제작 국가 → 장르)를 중심에서 외곽으로 펼쳐지는 원형 공간에 시각화하여 계층 간 구조와 비중을 계층적으로 파악하기에 적합합니다.\n"
+    f"- **데이터 분석:** 제작 국가 중 **{top_nation}** 영화가 총 {top_nation_count}편으로 가장 큰 비중을 차지하며, {top_nation} 영화 내에서는 **{top_genre_name}** 장르({top_genre_count}편)가 가장 높은 비율을 기록하고 있습니다."
 )
 
 st.divider()
