@@ -431,3 +431,63 @@ st.info(
 )
 
 st.divider()
+
+# ==========================================
+# 아홉 번째 그래프: TOP10 최장 유지 영화 상위 20개 (수평 막대 그래프)
+# ==========================================
+st.subheader("9. TOP10 최장 유지 영화 상위 20개 (수평 막대 그래프)")
+
+# 수평 막대 그래프용 데이터 전처리
+df_bar = df.dropna(subset=["movieNm", "days_in_top10", "nation"]).copy()
+df_bar["days_in_top10"] = pd.to_numeric(
+    df_bar["days_in_top10"], errors="coerce"
+)
+df_bar = df_bar[df_bar["days_in_top10"] > 0]
+
+# 영화별 TOP10 유지 일수 상위 20개 추출
+df_bar_top20 = (
+    df_bar.groupby(["movieNm", "nation"], as_index=False)["days_in_top10"]
+    .max()
+    .sort_values(by="days_in_top10", ascending=True)
+    .tail(20)
+)
+
+# 수평 막대 그래프 생성 (Plotly는 아래에서 위 순서로 그리므로 오름차순 정렬 시 1위가 맨 위에 위치)
+fig9 = px.bar(
+    df_bar_top20,
+    x="days_in_top10",
+    y="movieNm",
+    color="nation",
+    orientation="h",
+    labels={
+        "days_in_top10": "10위권 유지 일수 (일)",
+        "movieNm": "영화명",
+        "nation": "제작 국가",
+    },
+)
+
+fig9.update_traces(
+    hovertemplate="<b>%{y}</b><br>제작 국가: %{fullData.name}<br>유지 일수: %{x}일<extra></extra>"
+)
+
+fig9.update_layout(
+    xaxis_title="10위권 유지 일수 (일)",
+    yaxis_title="영화명",
+    height=600,  # 20개 항목을 여유 있게 보여주기 위한 높이 설정
+)
+
+st.plotly_chart(fig9, use_container_width=True)
+
+# 인사이트 자동 계산
+top1_movie = df_bar_top20.iloc[-1]
+top1_name = top1_movie["movieNm"]
+top1_days = int(top1_movie["days_in_top10"])
+top1_nation = top1_movie["nation"]
+
+st.info(
+    f"**이 그래프로 알 수 있는 것:**\n\n"
+    f"- **그래프 특성:** 수평 막대 그래프(Horizontal Bar Chart)는 주요 상위 항목의 개별 명칭과 수치 크기를 직관적이고 정밀하게 일대일로 비교하기에 가장 적합합니다.\n"
+    f"- **데이터 분석:** 10위권 내에 가장 오랫동안 머문 영화 1위는 **{top1_nation}**의 **{top1_name}**(총 {top1_days}일)이며, 상위 20개 영화의 순위와 흥행 기간 차이를 명확하게 파악할 수 있습니다."
+)
+
+st.divider()
