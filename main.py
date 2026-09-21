@@ -348,7 +348,7 @@ st.divider()
 # ==========================================
 st.subheader("7. 제작 국가 및 장르별 영화 편수 (선버스트)")
 
-# 선버스트용 데이터 전처리 (국가 및 장르별 영화 편수 집계)
+# 선버스트용 데이터 전처리
 df_sun = df.dropna(subset=["nation", "genre"]).copy()
 df_sun = (
     df_sun.groupby(["nation", "genre"]).size().reset_index(name="movie_count")
@@ -383,6 +383,51 @@ st.info(
     f"**이 그래프로 알 수 있는 것:**\n\n"
     f"- **그래프 특성:** 선버스트 차트(Sunburst Chart)는 계층적 데이터 구조(제작 국가 → 장르)를 중심에서 외곽으로 펼쳐지는 원형 공간에 시각화하여 계층 간 구조와 비중을 계층적으로 파악하기에 적합합니다.\n"
     f"- **데이터 분석:** 제작 국가 중 **{top_nation}** 영화가 총 {top_nation_count}편으로 가장 큰 비중을 차지하며, {top_nation} 영화 내에서는 **{top_genre_name}** 장르({top_genre_count}편)가 가장 높은 비율을 기록하고 있습니다."
+)
+
+st.divider()
+
+# ==========================================
+# 여덟 번째 그래프: 제작 국가 및 영화별 TOP10 유지 기간 (트리맵)
+# ==========================================
+st.subheader("8. 제작 국가 및 영화별 TOP10 유지 기간 (트리맵)")
+
+# 트리맵용 데이터 전처리 (제작 국가 -> 영화명, 타일 크기는 days_in_top10)
+df_tree2 = df.dropna(subset=["nation", "movieNm", "days_in_top10"]).copy()
+df_tree2["days_in_top10"] = pd.to_numeric(
+    df_tree2["days_in_top10"], errors="coerce"
+)
+df_tree2 = df_tree2[df_tree2["days_in_top10"] > 0]
+
+# 동일 제작 국가/영화명 중복 항목 합산 처리
+df_tree2 = (
+    df_tree2.groupby(["nation", "movieNm"], as_index=False)["days_in_top10"]
+    .sum()
+)
+
+# 트리맵 그래프 생성
+fig8 = px.treemap(
+    df_tree2,
+    path=["nation", "movieNm"],
+    values="days_in_top10",
+)
+
+fig8.update_traces(
+    hovertemplate="<b>%{label}</b><br>TOP10 유지 기간: %{value}일<extra></extra>"
+)
+
+st.plotly_chart(fig8, use_container_width=True)
+
+# 인사이트 자동 계산
+top_nation_days = df_tree2.groupby("nation")["days_in_top10"].sum().idxmax()
+top_movie_days_row = df_tree2.loc[df_tree2["days_in_top10"].idxmax()]
+top_movie_days_name = top_movie_days_row["movieNm"]
+top_movie_days_val = int(top_movie_days_row["days_in_top10"])
+
+st.info(
+    f"**이 그래프로 알 수 있는 것:**\n\n"
+    f"- **그래프 특성:** 트리맵 그래프는 제작 국가별로 속한 영화들을 계층 구조로 나타내며, 박스오피스 TOP10 누적 유지 일수의 상대적 규모를 사각형 면적으로 비교하기에 적합합니다.\n"
+    f"- **데이터 분석:** TOP10 총 유지 일수 합계가 가장 높은 제작 국가는 **{top_nation_days}**이며, 단일 영화 기준으로는 **{top_movie_days_name}**(총 {top_movie_days_val}일)이 가장 오랫동안 박스오피스 상위권을 지켰습니다."
 )
 
 st.divider()
