@@ -1,433 +1,191 @@
-import pandas as pd
-import plotly.express as px
 import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy import stats
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import RidgeCV
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 # 페이지 기본 설정
-st.set_page_config(page_title="영화 데이터 그래프", layout="wide")
+st.set_page_config(
+    page_title="다이아몬드 가격 예측 AI (Ridge 회귀)",
+    page_icon="💎",
+    layout="wide"
+)
+plt.rcParams['axes.unicode_minus'] = False
 
-st.title("영화 데이터 그래프")
 
+# 1. 데이터 로드 및 모델 학습 (최초 1회 실행 후 서버 메모리에 캐싱)
+@st.cache_resource
+def load_and_train():
+    df = pd.read_csv('diamonds_b2_preprocessed.csv')
+    feature_cols = [c for c in df.columns if c not in ['price', 'log1p_price']]
+    X = df[feature_cols]
+    y = df['price']
 
-# 데이터 로드 및 전처리 함수 (캐싱 적용)
-@st.cache_data
-def load_data():
-    url = "https://raw.githubusercontent.com/greatsong/modudata/main/data/kobis_movies.csv"
-    df = pd.read_csv(url)
-
-    # 장르 전처리: 세로막대(|) 기호로 여러 개 적힌 경우 첫 번째 장르만 추출
-    df["genre"] = df["genre"].apply(
-        lambda x: str(x).split("|")[0] if pd.notnull(x) else x
+    # 8:2 가격 10분위수 층화 분할
+    price_bins = pd.qcut(y, q=10, labels=False)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=price_bins
     )
 
-    return df
+    # RidgeCV 파이프라인 학습 (log1p 타겟)
+    pipe = Pipeline([
+        ('scaler', StandardScaler()),
+        ('reg', RidgeCV(alphas=[0.01, 0.1, 1.0, 10.0, 100.0], cv=5))
+    ])
+    pipe.fit(X_train, np.log1p(y_train))
+
+    # 테스트 세트 예측 및 달러($) 역변환
+    pred_test_log = pipe.predict(X_test)
+    pred_test_usd = np.clip(np.expm1(pred_test_log), 326.0, 18823.0)
+
+    metrics = {
+        'rmse': float(np.sqrt(mean_squared_error(y_test, pred_test_usd))),
+        'mae': float(mean_absolute_error(y_test, pred_test_usd)),
+        'r2': float(r2_score(y_test, pred_test_usd)),
+        'alpha': float(pipe.named_steps['reg'].alpha_)
+    }
+
+    # 회귀 계수 정리
+    scaler = pipe.named_steps['scaler']
+    reg = pipe.named_steps['reg']
+    raw_coefs = reg.coef_ / scaler.scale_
+    coef_df = pd.DataFrame({
+        'feature': feature_cols,
+        'std_coef': reg.coef_,
+        'raw_coef': raw_coefs,
+        'pct_impact': (np.exp(raw_coefs) - 1) * 100
+    }).sort_values(by='std_coef', key=abs, ascending=False)
+
+    return pipe, feature_cols, metrics, coef_df, X_test, y_test, pred_test_log, pred_test_usd
 
 
-# 데이터 불러오기
-df = load_data()
+pipe, feature_cols, metrics, coef_df, X_test, y_test, pred_test_log, pred_test_usd = load_and_train()
 
-# ==========================================
-# 첫 번째 그래프: 장르별 영화 편수 (도넛 그래프)
-# ==========================================
-st.subheader("1. 장르별 영화 편수 (도넛 그래프)")
+# --- 헤더 영역 ---
+st.title("💎 다이아몬드 가격 예측 및 회귀 분석 웹앱")
+st.markdown("정제된 **53,772건**의 GIA 다이아몬드 데이터와 **B2 전처리(로그 변환 + 원-핫 인코딩 + RidgeCV)**를 기반으로 실시간 시세를 예측합니다.")
 
-# 장르별 편수 집계
-genre_counts = df["genre"].value_counts().reset_index()
-genre_counts.columns = ["장르", "편수"]
-
-# 플롯리 도넛 그래프 생성
-fig1 = px.pie(
-    genre_counts,
-    values="편수",
-    names="장르",
-    hole=0.4,
-)
-
-fig1.update_traces(
-    textposition="inside",
-    textinfo="label+percent",
-    hovertemplate="<b>%{label}</b><br>편수: %{value}편<br>비율: %{percent}<extra></extra>",
-)
-
-st.plotly_chart(fig1, use_container_width=True)
-
-# 인사이트 자동 계산 및 출력
-top_genre = genre_counts.iloc[0]["장르"]
-top_count = genre_counts.iloc[0]["편수"]
-total_count = genre_counts["편수"].sum()
-top_ratio = (top_count / total_count) * 100
-
-st.info(
-    f"**이 그래프로 알 수 있는 것:**\n\n"
-    f"- **그래프 특성:** 도넛 그래프는 전체에서 각 범주(장르)가 차지하는 비중과 비율을 한눈에 파악하고 비교하기에 적합합니다.\n"
-    f"- **데이터 분석:** 개봉한 영화 중 **{top_genre}** 장르가 총 {top_count}편({top_ratio:.1f}%)으로 가장 높은 비중을 차지하고 있습니다."
-)
-
-st.divider()
-
-# ==========================================
-# 두 번째 그래프: 장르 및 영화별 총 관객 수 (트리맵)
-# ==========================================
-st.subheader("2. 장르 및 영화별 총 관객 수 (트리맵)")
-
-# 트리맵용 데이터 전처리
-df_tree = df.dropna(subset=["genre", "movieNm", "total_audi"]).copy()
-df_tree["total_audi"] = pd.to_numeric(df_tree["total_audi"], errors="coerce")
-df_tree = df_tree[df_tree["total_audi"] > 0]
-
-# 동일 장르/영화명 중복 항목 합산 처리
-df_tree = (
-    df_tree.groupby(["genre", "movieNm"], as_index=False)["total_audi"].sum()
-)
-
-# 트리맵 그래프 생성
-fig2 = px.treemap(
-    df_tree,
-    path=["genre", "movieNm"],
-    values="total_audi",
-)
-
-fig2.update_traces(
-    hovertemplate="<b>%{label}</b><br>총 관객 수: %{value:,}명<extra></extra>"
-)
-
-st.plotly_chart(fig2, use_container_width=True)
-
-# 인사이트 자동 계산 및 출력
-top_audi_genre = df_tree.groupby("genre")["total_audi"].sum().idxmax()
-top_movie_row = df_tree.loc[df_tree["total_audi"].idxmax()]
-top_movie_name = top_movie_row["movieNm"]
-top_movie_audi = top_movie_row["total_audi"] / 10000
-
-st.info(
-    f"**이 그래프로 알 수 있는 것:**\n\n"
-    f"- **그래프 특성:** 트리맵 그래프는 상위 계층(장르)과 하위 계층(영화) 구조를 직관적으로 표현하며, 각 항목의 관객 수 규모를 사각형 면적으로 비교하는 데 유용합니다.\n"
-    f"- **데이터 분석:** 총 관객 동원력이 가장 높은 장르는 **{top_audi_genre}**이며, 단일 영화 기준으로는 **{top_movie_name}**(약 {top_movie_audi:,.0f}만 명)이 가장 큰 비중을 차지하고 있습니다."
-)
+# 핵심 모델 성능 지표 요약 카드
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("테스트 R² (설명력)", f"{metrics['r2']:.4f}")
+col2.metric("테스트 MAE (평균 절대 오차)", f"${metrics['mae']:,.2f}")
+col3.metric("테스트 RMSE", f"${metrics['rmse']:,.2f}")
+col4.metric("최적 규제 강도 (Alpha)", f"{metrics['alpha']}")
 
 st.divider()
 
-# ==========================================
-# 세 번째 그래프: 총 관객 수 분포 (히스토그램)
-# ==========================================
-st.subheader("3. 총 관객 수 분포 (히스토그램)")
+# --- 3개 탭 구성 ---
+tab1, tab2, tab3 = st.tabs([
+    "🔮 실시간 다이아몬드 가격 예측",
+    "📊 회귀 계수(영향력) 분석",
+    "🩺 잔차(오차) 진단 리포트"
+])
 
-# 히스토그램용 데이터 전처리
-df_hist = df.dropna(subset=["total_audi"]).copy()
-df_hist["total_audi"] = pd.to_numeric(df_hist["total_audi"], errors="coerce")
-df_hist = df_hist[df_hist["total_audi"] > 0]
+# [탭 1] 사용자 입력 기반 실시간 예측
+with tab1:
+    st.subheader("다이아몬드 4C 스펙을 입력하세요")
+    c1, c2, c3 = st.columns(3)
 
-# 히스토그램 그래프 생성
-fig3 = px.histogram(
-    df_hist,
-    x="total_audi",
-    nbins=20,
-    labels={"total_audi": "총 관객 수", "count": "영화 편수"},
-)
+    with c1:
+        carat = st.slider("중량 (Carat)", min_value=0.20, max_value=4.00, value=1.00, step=0.01)
+        cut = st.selectbox("연마 등급 (Cut)", ['Ideal', 'Premium', 'Very Good', 'Good', 'Fair'], index=0)
 
-fig3.update_traces(
-    hovertemplate="<b>총 관객 수 구간</b>: %{x}명<br><b>영화 편수</b>: %{y}편<extra></extra>"
-)
+    with c2:
+        color = st.selectbox("색상 등급 (Color, D가 최고)", ['D', 'E', 'F', 'G', 'H', 'I', 'J'], index=3)
+        clarity = st.selectbox(
+            "투명도 등급 (Clarity, IF가 최고)",
+            ['IF', 'VVS1', 'VVS2', 'VS1', 'VS2', 'SI1', 'SI2', 'I1'],
+            index=3
+        )
 
-fig3.update_layout(
-    xaxis_title="총 관객 수 (명)", yaxis_title="영화 편수 (개)", bargap=0.1
-)
+    with c3:
+        depth = st.number_input("깊이 비율 (Depth %)", min_value=43.0, max_value=79.0, value=61.7, step=0.1)
+        table = st.number_input("상단 평면 비율 (Table %)", min_value=43.0, max_value=95.0, value=57.0, step=0.1)
 
-st.plotly_chart(fig3, use_container_width=True)
+    # 입력값을 B2 전처리 피처 벡터(21열)로 변환
+    input_dict = {col: 0.0 for col in feature_cols}
+    input_dict['carat'] = carat
+    input_dict['log_carat'] = np.log(carat)
+    input_dict['depth'] = depth
+    input_dict['table'] = table
 
-# 인사이트 자동 계산
-max_audi = int(df_hist["total_audi"].max())
-bin_size = 1000000  # 100만 명
-bins = list(range(0, max_audi + bin_size, bin_size))
-labels = [f"{i//10000}~{(i+bin_size)//10000}만 명" for i in bins[:-1]]
+    if f"cut_{cut}" in input_dict:
+        input_dict[f"cut_{cut}"] = 1.0
+    if f"color_{color}" in input_dict:
+        input_dict[f"color_{color}"] = 1.0
+    if f"clarity_{clarity}" in input_dict:
+        input_dict[f"clarity_{clarity}"] = 1.0
 
-df_hist["audi_range"] = pd.cut(
-    df_hist["total_audi"], bins=bins, labels=labels, include_lowest=True
-)
-most_frequent_range = df_hist["audi_range"].mode()[0]
-most_frequent_count = df_hist["audi_range"].value_counts().max()
+    input_df = pd.DataFrame([input_dict])[feature_cols]
+    pred_log = pipe.predict(input_df)[0]
+    pred_usd = float(np.clip(np.expm1(pred_log), 326.0, 18823.0))
 
-top_movie_hist = df_hist.loc[df_hist["total_audi"].idxmax()]
-top_movie_hist_name = top_movie_hist["movieNm"]
-top_movie_hist_audi = top_movie_hist["total_audi"] / 10000
+    st.success(f"### 예상 감정가: **${pred_usd:,.2f} USD**")
+    st.caption(f"로그 스케일 예측값: `{pred_log:.4f}` | 역변환(`np.expm1`) 및 데이터 상·하한 클리핑 적용 결과")
 
-st.info(
-    f"**이 그래프로 알 수 있는 것:**\n\n"
-    f"- **그래프 특성:** 히스토그램은 수치형 연속 데이터의 전체적인 분포 형태, 쏠림 정도, 특정 구간으로의 밀집 상태를 확인하기에 적합합니다.\n"
-    f"- **데이터 분석:** 대부분의 영화({most_frequent_count}편)가 **{most_frequent_range}** 구간에 몰려 있으며, 가장 많은 관객을 동원한 영화는 **{top_movie_hist_name}**(약 {top_movie_hist_audi:,.0f}만 명)입니다."
-)
+# [탭 2] 회귀 계수 분석
+with tab2:
+    st.subheader("표준화 회귀 계수 및 등급별 가격 영향률")
+    st.markdown("- **기준(Baseline) 등급:** `Cut = Fair`, `Color = D(최상위)`, `Clarity = I1(최하위)`")
 
-st.divider()
+    fig_coef, ax = plt.subplots(figsize=(10, 6))
+    coef_plot = coef_df.sort_values(by='std_coef', ascending=True)
+    colors = ['#d95f02' if c < 0 else '#1b9e77' for c in coef_plot['std_coef']]
+    ax.barh(coef_plot['feature'], coef_plot['std_coef'], color=colors)
+    ax.axvline(0, color='black', lw=1)
+    ax.set_title('Standardized Ridge Coefficients (Feature Impact)')
+    ax.set_xlabel('Standardized Coefficient (Beta)')
+    ax.grid(True, axis='x', alpha=0.3)
+    st.pyplot(fig_coef)
 
-# ==========================================
-# 네 번째 그래프: 개봉일 스크린 수 vs 총 관객 수 (산점도)
-# ==========================================
-st.subheader("4. 개봉일 스크린 수 vs 총 관객 수 (산점도)")
+    st.dataframe(
+        coef_df.style.format({
+            'std_coef': '{:.4f}',
+            'raw_coef': '{:.4f}',
+            'pct_impact': '{:+.2f}%'
+        }),
+        use_container_width=True
+    )
 
-# 산점도용 데이터 전처리
-df_scatter = df.dropna(
-    subset=["first_scrn", "total_audi", "genre", "movieNm"]
-).copy()
-df_scatter["first_scrn"] = pd.to_numeric(
-    df_scatter["first_scrn"], errors="coerce"
-)
-df_scatter["total_audi"] = pd.to_numeric(
-    df_scatter["total_audi"], errors="coerce"
-)
-df_scatter = df_scatter[
-    (df_scatter["first_scrn"] > 0) & (df_scatter["total_audi"] > 0)
-]
+# [탭 3] 잔차 분석
+with tab3:
+    st.subheader("테스트 세트(10,755건) 잔차(Residual) 진단")
+    y_test_log = np.log1p(y_test)
+    resid_log = y_test_log - pred_test_log
+    resid_usd = y_test - pred_test_usd
 
-# 산점도 그래프 생성
-fig4 = px.scatter(
-    df_scatter,
-    x="first_scrn",
-    y="total_audi",
-    color="genre",
-    hover_name="movieNm",
-    labels={
-        "first_scrn": "개봉일 스크린 수",
-        "total_audi": "총 관객 수",
-        "genre": "장르",
-    },
-)
+    fig_res, axes = plt.subplots(1, 3, figsize=(16, 4.8))
 
-fig4.update_traces(
-    hovertemplate="<b>%{hovertext}</b><br>개봉일 스크린 수: %{x:,}개<br>총 관객 수: %{y:,}명<extra></extra>"
-)
+    # 1. Actual vs Predicted
+    axes[0].scatter(y_test, pred_test_usd, alpha=0.15, s=10, color='#2b5c8f')
+    axes[0].plot([0, 20000], [0, 20000], 'r--', lw=1.5)
+    axes[0].set_title('Actual vs. Predicted ($)')
+    axes[0].set_xlabel('Actual Price ($)')
+    axes[0].set_ylabel('Predicted Price ($)')
+    axes[0].grid(True, alpha=0.3)
 
-fig4.update_layout(
-    xaxis_title="개봉일 스크린 수 (개)",
-    yaxis_title="총 관객 수 (명)",
-)
+    # 2. Log Residual Histogram
+    sns.histplot(resid_log, bins=50, stat='density', color='#2ca02c', alpha=0.5, ax=axes[1])
+    x_norm = np.linspace(resid_log.min(), resid_log.max(), 200)
+    axes[1].plot(x_norm, stats.norm.pdf(x_norm, resid_log.mean(), resid_log.std()), 'r--')
+    axes[1].set_title('Log Residual Normality')
+    axes[1].set_xlabel('Log Residual')
+    axes[1].grid(True, alpha=0.3)
 
-st.plotly_chart(fig4, use_container_width=True)
+    # 3. USD Residuals vs Carat
+    axes[2].scatter(X_test['carat'], resid_usd, alpha=0.15, s=10, color='#d95f02')
+    axes[2].axhline(0, color='black', linestyle='--')
+    axes[2].set_ylim(-8000, 8000)
+    axes[2].set_title('USD Residuals vs. Carat')
+    axes[2].set_xlabel('Carat')
+    axes[2].set_ylabel('Residual ($)')
+    axes[2].grid(True, alpha=0.3)
 
-# 인사이트 자동 계산
-corr = df_scatter["first_scrn"].corr(df_scatter["total_audi"])
-corr_text = (
-    "강한 양의 상관관계"
-    if corr > 0.7
-    else "뚜렷한 양의 상관관계"
-    if corr > 0.4
-    else "약한 상관관계"
-)
-
-st.info(
-    f"**이 그래프로 알 수 있는 것:**\n\n"
-    f"- **그래프 특성:** 산점도(Scatter Plot)는 두 연속형 변수 간의 관계(상관관계, 경향성, 아웃라이어)를 시각화하고 그룹별(장르별) 분포 차이를 파악하는 데 적합합니다.\n"
-    f"- **데이터 분석:** 개봉일 스크린 수와 총 관객 수 간에는 **{corr_text}(상관계수 r ≈ {corr:.2f})**가 관찰되며, 초기 스크린 수를 많이 확보할수록 최종 관객 수가 증가하는 경향이 있음을 보여줍니다."
-)
-
-st.divider()
-
-# ==========================================
-# 다섯 번째 그래프: 주요 장르별 총 관객 수 분포 (상자 그림)
-# ==========================================
-st.subheader("5. 주요 장르별 총 관객 수 분포 (상자 그림)")
-
-# 영화가 10편 이상인 장르만 필터링
-genre_counts_all = df["genre"].value_counts()
-valid_genres = genre_counts_all[genre_counts_all >= 10].index
-
-df_box = df[df["genre"].isin(valid_genres)].copy()
-df_box["total_audi"] = pd.to_numeric(df_box["total_audi"], errors="coerce")
-df_box = df_box.dropna(subset=["genre", "total_audi", "movieNm"])
-
-# 상자 그림 생성
-fig5 = px.box(
-    df_box,
-    x="genre",
-    y="total_audi",
-    hover_name="movieNm",
-    points="outliers",
-    labels={
-        "genre": "장르",
-        "total_audi": "총 관객 수",
-    },
-)
-
-fig5.update_traces(
-    hovertemplate="<b>%{hovertext}</b><br>총 관객 수: %{y:,}명<extra></extra>"
-)
-
-fig5.update_layout(
-    xaxis_title="장르 (10편 이상 개봉)",
-    yaxis_title="총 관객 수 (명)",
-)
-
-st.plotly_chart(fig5, use_container_width=True)
-
-# 인사이트 자동 계산
-median_by_genre = (
-    df_box.groupby("genre")["total_audi"].median().sort_values(ascending=False)
-)
-top_median_genre = median_by_genre.index[0]
-top_median_val = median_by_genre.iloc[0] / 10000
-
-top_outlier_row = df_box.loc[df_box["total_audi"].idxmax()]
-top_outlier_movie = top_outlier_row["movieNm"]
-top_outlier_genre = top_outlier_row["genre"]
-top_outlier_audi = top_outlier_row["total_audi"] / 10000
-
-st.info(
-    f"**이 그래프로 알 수 있는 것:**\n\n"
-    f"- **그래프 특성:** 상자 그림(Box Plot)은 범주별 데이터의 중앙값, 사분위수(분포 범위), 그리고 평균적인 범위를 크게 벗어난 이상치(Outlier)를 비교하기에 적합합니다.\n"
-    f"- **데이터 분석:** 10편 이상 개봉한 장르 중 중앙값 기준 관객 동원력이 가장 높은 장르는 **{top_median_genre}**(중앙값 약 {top_median_val:,.0f}만 명)이며, **{top_outlier_genre}** 장르의 **{top_outlier_movie}**(약 {top_outlier_audi:,.0f}만 명)가 가장 두드러진 아웃라이어로 나타납니다."
-)
-
-st.divider()
-
-# ==========================================
-# 여섯 번째 그래프: 스크린 수 vs 총 관객 수 vs 첫 주 관객 수 (버블 차트)
-# ==========================================
-st.subheader("6. 개봉일 스크린 수 vs 총 관객 수 vs 첫 주 관객 수 (버블 차트)")
-
-# 버블 차트용 데이터 전처리
-df_bubble = df.dropna(
-    subset=["first_scrn", "total_audi", "first_week_audi", "genre", "movieNm"]
-).copy()
-df_bubble["first_scrn"] = pd.to_numeric(
-    df_bubble["first_scrn"], errors="coerce"
-)
-df_bubble["total_audi"] = pd.to_numeric(
-    df_bubble["total_audi"], errors="coerce"
-)
-df_bubble["first_week_audi"] = pd.to_numeric(
-    df_bubble["first_week_audi"], errors="coerce"
-)
-df_bubble = df_bubble[
-    (df_bubble["first_scrn"] > 0)
-    & (df_bubble["total_audi"] > 0)
-    & (df_bubble["first_week_audi"] > 0)
-]
-
-# 버블 차트 생성
-fig6 = px.scatter(
-    df_bubble,
-    x="first_scrn",
-    y="total_audi",
-    size="first_week_audi",
-    color="genre",
-    hover_name="movieNm",
-    size_max=40,
-    labels={
-        "first_scrn": "개봉일 스크린 수",
-        "total_audi": "총 관객 수",
-        "first_week_audi": "첫 주 관객 수",
-        "genre": "장르",
-    },
-)
-
-fig6.update_traces(
-    hovertemplate="<b>%{hovertext}</b><br>개봉일 스크린 수: %{x:,}개<br>총 관객 수: %{y:,}명<br>첫 주 관객 수: %{marker.size:,}명<extra></extra>"
-)
-
-fig6.update_layout(
-    xaxis_title="개봉일 스크린 수 (개)",
-    yaxis_title="총 관객 수 (명)",
-)
-
-st.plotly_chart(fig6, use_container_width=True)
-
-# 인사이트 자동 계산
-corr_first_week = df_bubble["first_week_audi"].corr(df_bubble["total_audi"])
-top_first_week_row = df_bubble.loc[df_bubble["first_week_audi"].idxmax()]
-top_first_week_movie = top_first_week_row["movieNm"]
-top_first_week_audi = top_first_week_row["first_week_audi"] / 10000
-
-st.info(
-    f"**이 그래프로 알 수 있는 것:**\n\n"
-    f"- **그래프 특성:** 버블 차트(Bubble Chart)는 산점도에 원의 크기(3번째 변수)를 추가하여 세 가지 수치형 변수 간의 다차원적 상관관계와 규모를 동시에 비교하기에 적합합니다.\n"
-    f"- **데이터 분석:** 개봉일 스크린 수와 총 관객 수가 높은 영화일수록 **첫 주 관객 수(원의 크기)** 또한 대체로 크며(상관계수 r ≈ {corr_first_week:.2f}), 첫 주 흥행 실적이 최종 성공에 강력한 영향을 미침을 보여줍니다. (첫 주 관객 최다 영화: **{top_first_week_movie}**, 약 {top_first_week_audi:,.0f}만 명)"
-)
-
-st.divider()
-
-# ==========================================
-# 일곱 번째 그래프: 제작 국가 및 장르별 영화 편수 (선버스트)
-# ==========================================
-st.subheader("7. 제작 국가 및 장르별 영화 편수 (선버스트)")
-
-# 선버스트용 데이터 전처리
-df_sun = df.dropna(subset=["nation", "genre"]).copy()
-df_sun = (
-    df_sun.groupby(["nation", "genre"]).size().reset_index(name="movie_count")
-)
-
-# 선버스트 그래프 생성
-fig7 = px.sunburst(
-    df_sun,
-    path=["nation", "genre"],
-    values="movie_count",
-)
-
-fig7.update_traces(
-    hovertemplate="<b>%{label}</b><br>영화 편수: %{value}편<extra></extra>"
-)
-
-st.plotly_chart(fig7, use_container_width=True)
-
-# 인사이트 자동 계산
-top_nation = df_sun.groupby("nation")["movie_count"].sum().idxmax()
-top_nation_count = df_sun.groupby("nation")["movie_count"].sum().max()
-
-top_genre_in_nation_row = (
-    df_sun[df_sun["nation"] == top_nation]
-    .sort_values(by="movie_count", ascending=False)
-    .iloc[0]
-)
-top_genre_name = top_genre_in_nation_row["genre"]
-top_genre_count = top_genre_in_nation_row["movie_count"]
-
-st.info(
-    f"**이 그래프로 알 수 있는 것:**\n\n"
-    f"- **그래프 특성:** 선버스트 차트(Sunburst Chart)는 계층적 데이터 구조(제작 국가 → 장르)를 중심에서 외곽으로 펼쳐지는 원형 공간에 시각화하여 계층 간 구조와 비중을 계층적으로 파악하기에 적합합니다.\n"
-    f"- **데이터 분석:** 제작 국가 중 **{top_nation}** 영화가 총 {top_nation_count}편으로 가장 큰 비중을 차지하며, {top_nation} 영화 내에서는 **{top_genre_name}** 장르({top_genre_count}편)가 가장 높은 비율을 기록하고 있습니다."
-)
-
-st.divider()
-
-# ==========================================
-# 여덟 번째 그래프: 제작 국가 및 영화별 TOP10 유지 기간 (트리맵)
-# ==========================================
-st.subheader("8. 제작 국가 및 영화별 TOP10 유지 기간 (트리맵)")
-
-# 트리맵용 데이터 전처리 (제작 국가 -> 영화명, 타일 크기는 days_in_top10)
-df_tree2 = df.dropna(subset=["nation", "movieNm", "days_in_top10"]).copy()
-df_tree2["days_in_top10"] = pd.to_numeric(
-    df_tree2["days_in_top10"], errors="coerce"
-)
-df_tree2 = df_tree2[df_tree2["days_in_top10"] > 0]
-
-# 동일 제작 국가/영화명 중복 항목 합산 처리
-df_tree2 = (
-    df_tree2.groupby(["nation", "movieNm"], as_index=False)["days_in_top10"]
-    .sum()
-)
-
-# 트리맵 그래프 생성
-fig8 = px.treemap(
-    df_tree2,
-    path=["nation", "movieNm"],
-    values="days_in_top10",
-)
-
-fig8.update_traces(
-    hovertemplate="<b>%{label}</b><br>TOP10 유지 기간: %{value}일<extra></extra>"
-)
-
-st.plotly_chart(fig8, use_container_width=True)
-
-# 인사이트 자동 계산
-top_nation_days = df_tree2.groupby("nation")["days_in_top10"].sum().idxmax()
-top_movie_days_row = df_tree2.loc[df_tree2["days_in_top10"].idxmax()]
-top_movie_days_name = top_movie_days_row["movieNm"]
-top_movie_days_val = int(top_movie_days_row["days_in_top10"])
-
-st.info(
-    f"**이 그래프로 알 수 있는 것:**\n\n"
-    f"- **그래프 특성:** 트리맵 그래프는 제작 국가별로 속한 영화들을 계층 구조로 나타내며, 박스오피스 TOP10 누적 유지 일수의 상대적 규모를 사각형 면적으로 비교하기에 적합합니다.\n"
-    f"- **데이터 분석:** TOP10 총 유지 일수 합계가 가장 높은 제작 국가는 **{top_nation_days}**이며, 단일 영화 기준으로는 **{top_movie_days_name}**(총 {top_movie_days_val}일)이 가장 오랫동안 박스오피스 상위권을 지켰습니다."
-)
-
-st.divider()
+    plt.tight_layout()
+    st.pyplot(fig_res)
